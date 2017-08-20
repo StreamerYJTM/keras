@@ -50,7 +50,7 @@ def parse_stories(lines, only_supporting=False):
         if nid == 1:
             story = []
         if '\t' in line:
-            q, a, supporting = line.split('\t')
+            q, a, supporting = line.split('\t') #supporting未详
             q = tokenize(q)
             substory = None
             if only_supporting:
@@ -77,7 +77,7 @@ def get_stories(f, only_supporting=False, max_length=None):
     any stories longer than max_length tokens will be discarded.
     '''
     data = parse_stories(f.readlines(), only_supporting=only_supporting)
-    flatten = lambda data: reduce(lambda x, y: x + y, data)
+    flatten = lambda data: reduce(lambda x, y: x + y, data) #相当于对list data连接
     data = [(flatten(story), q, answer) for story, q, answer in data if not max_length or len(flatten(story)) < max_length]
     return data
 
@@ -114,7 +114,7 @@ challenges = {
     'two_supporting_facts_10k': 'tasks_1-20_v1-2/en-10k/qa2_two-supporting-facts_{}.txt',
 }
 challenge_type = 'single_supporting_fact_10k'
-challenge = challenges[challenge_type]
+challenge = challenges[challenge_type] #选择数据集，单个支持事实的论据
 
 print('Extracting stories for the challenge:', challenge_type)
 train_stories = get_stories(tar.extractfile(challenge.format('train')))
@@ -168,8 +168,8 @@ print('-')
 print('Compiling...')
 
 # placeholders
-input_sequence = Input((story_maxlen,))
-question = Input((query_maxlen,))
+input_sequence = Input((story_maxlen,)) #共两个输入层，input_sequence为输入情景的数据集
+question = Input((query_maxlen,))#question为问题的数据集
 
 # encoders
 # embed the input sequence into a sequence of vectors
@@ -201,17 +201,21 @@ input_encoded_c = input_encoder_c(input_sequence)
 question_encoded = question_encoder(question)
 
 # compute a 'match' between the first input vector sequence
-# and the question vector sequence
+# and the question vector sequence 计算第一个input序列和问题序列的联系
 # shape: `(samples, story_maxlen, query_maxlen)`
+# 计算两个向量的点积
 match = dot([input_encoded_m, question_encoded], axes=(2, 2))
 match = Activation('softmax')(match)
 
 # add the match matrix with the second input vector sequence
 response = add([match, input_encoded_c])  # (samples, story_maxlen, query_maxlen)
-response = Permute((2, 1))(response)  # (samples, query_maxlen, story_maxlen)
+response = Permute((2, 1))(response)  # (samples, query_maxlen, story_maxlen) 重排层 重排1,2维
 
 # concatenate the match matrix with the question vector sequence
-answer = concatenate([response, question_encoded])
+# permute_1 (Permute)              (None, 4, 68) +
+# sequential_3 (Sequential)        (None, 4, 64) =
+# concatenate_1 (Concatenate)      (None, 4, 132) 
+answer = concatenate([response, question_encoded]) 
 
 # the original paper uses a matrix multiplication for this reduction step.
 # we choose to use a RNN instead.
@@ -221,7 +225,7 @@ answer = LSTM(32)(answer)  # (samples, 32)
 answer = Dropout(0.3)(answer)
 answer = Dense(vocab_size)(answer)  # (samples, vocab_size)
 # we output a probability distribution over the vocabulary
-answer = Activation('softmax')(answer)
+answer = Activation('softmax')(answer) #(None, 22)
 
 # build the final model
 model = Model([input_sequence, question], answer)
@@ -233,3 +237,44 @@ model.fit([inputs_train, queries_train], answers_train,
           batch_size=32,
           epochs=120,
           validation_data=([inputs_test, queries_test], answers_test))
+'''
+____________________________________________________________________________________________________
+Layer (type)                     Output Shape          Param #     Connected to                     
+====================================================================================================
+input_1 (InputLayer)             (None, 68)            0                                            
+____________________________________________________________________________________________________
+input_2 (InputLayer)             (None, 4)             0                                            
+____________________________________________________________________________________________________
+sequential_1 (Sequential)        multiple              1408        input_1[0][0]                    
+____________________________________________________________________________________________________
+sequential_3 (Sequential)        (None, 4, 64)         1408        input_2[0][0]                    
+____________________________________________________________________________________________________
+dot_1 (Dot)                      (None, 68, 4)         0           sequential_1[1][0]               
+                                                                   sequential_3[1][0]               
+____________________________________________________________________________________________________
+activation_1 (Activation)        (None, 68, 4)         0           dot_1[0][0]                      
+____________________________________________________________________________________________________
+sequential_2 (Sequential)        multiple              88          input_1[0][0]                    
+____________________________________________________________________________________________________
+add_1 (Add)                      (None, 68, 4)         0           activation_1[0][0]               
+                                                                   sequential_2[1][0]               
+____________________________________________________________________________________________________
+permute_1 (Permute)              (None, 4, 68)         0           add_1[0][0]                      
+____________________________________________________________________________________________________
+concatenate_1 (Concatenate)      (None, 4, 132)        0           permute_1[0][0]                  
+                                                                   sequential_3[1][0]               
+____________________________________________________________________________________________________
+lstm_1 (LSTM)                    (None, 32)            21120       concatenate_1[0][0]              
+____________________________________________________________________________________________________
+dropout_4 (Dropout)              (None, 32)            0           lstm_1[0][0]                     
+____________________________________________________________________________________________________
+dense_1 (Dense)                  (None, 22)            726         dropout_4[0][0]                  
+____________________________________________________________________________________________________
+activation_2 (Activation)        (None, 22)            0           dense_1[0][0]                    
+====================================================================================================
+Total params: 24,750
+Trainable params: 24,750
+Non-trainable params: 0
+____________________________________________________________________________________________________
+Train on 10000 samples, validate on 1000 samples
+'''
