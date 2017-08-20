@@ -2,15 +2,15 @@
 '''An implementation of sequence to sequence learning for performing addition
 Input: "535+61"
 Output: "596"
-Padding is handled by using a repeated sentinel character (space)
+Padding is handled by using a repeated sentinel character (space)使用空格字符padding
 
-Input may optionally be inverted, shown to increase performance in many tasks in:
+Input may optionally be inverted, shown to increase performance in many tasks in: 反转输入能带来更多效果提升
 "Learning to Execute"
 http://arxiv.org/abs/1410.4615
 and
 "Sequence to Sequence Learning with Neural Networks"
 http://papers.nips.cc/paper/5346-sequence-to-sequence-learning-with-neural-networks.pdf
-Theoretically it introduces shorter term dependencies between source and target.
+Theoretically it introduces shorter term dependencies between source and target.理论上他会使得目标和输入之间的依赖关系更短
 
 Two digits inverted:
 + One layer LSTM (128 HN), 5k training examples = 99% train/test accuracy in 55 epochs
@@ -30,8 +30,8 @@ from keras.models import Sequential
 from keras import layers
 import numpy as np
 from six.moves import range
-
-
+from keras.callbacks import TensorBoard
+import tensorflow as tf
 class CharacterTable(object):
     """Given a set of characters:
     + Encode them to a one hot integer representation
@@ -42,7 +42,7 @@ class CharacterTable(object):
         """Initialize character table.
 
         # Arguments
-            chars: Characters that can appear in the input.
+            chars: Characters that can appear in the input.  index复数形式为indices
         """
         self.chars = sorted(set(chars))
         self.char_indices = dict((c, i) for i, c in enumerate(self.chars))
@@ -72,15 +72,15 @@ class colors:
     close = '\033[0m'
 
 # Parameters for the model and dataset.
-TRAINING_SIZE = 50000
-DIGITS = 3
+TRAINING_SIZE = 5000
+DIGITS = 2
 INVERT = True
 
 # Maximum length of input is 'int + int' (e.g., '345+678'). Maximum length of
 # int is DIGITS.
 MAXLEN = DIGITS + 1 + DIGITS
 
-# All the numbers, plus sign and space for padding.
+# All the numbers, plus sign and space for padding.有加号和空格
 chars = '0123456789+ '
 ctable = CharacterTable(chars)
 
@@ -88,26 +88,27 @@ questions = []
 expected = []
 seen = set()
 print('Generating data...')
-while len(questions) < TRAINING_SIZE:
+while len(questions) < TRAINING_SIZE:  #生成用于训练的数据集
     f = lambda: int(''.join(np.random.choice(list('0123456789'))
-                    for i in range(np.random.randint(1, DIGITS + 1))))
+                    for i in range(np.random.randint(1, DIGITS + 1)))) #随机生成1-DIGITS位int
     a, b = f(), f()
     # Skip any addition questions we've already seen
     # Also skip any such that x+Y == Y+x (hence the sorting).
     key = tuple(sorted((a, b)))
     if key in seen:
         continue
-    seen.add(key)
+    seen.add(key)#使用seen（set）防止重复的数字
     # Pad the data with spaces such that it is always MAXLEN.
     q = '{}+{}'.format(a, b)
-    query = q + ' ' * (MAXLEN - len(q))
-    ans = str(a + b)
+    query = q + ' ' * (MAXLEN - len(q)) #进行空格padding
+    ans = str(a + b) #计算正确答案a+b
     # Answers can be of maximum size DIGITS + 1.
-    ans += ' ' * (DIGITS + 1 - len(ans))
-    if INVERT:
+    ans += ' ' * (DIGITS + 1 - len(ans)) #ans的位数可能为max digits +1
+    if INVERT: #制造相反的算式
         # Reverse the query, e.g., '12+345  ' becomes '  543+21'. (Note the
         # space used for padding.)
         query = query[::-1]
+        #据说反着效果好
     questions.append(query)
     expected.append(ans)
 print('Total addition questions:', len(questions))
@@ -116,7 +117,7 @@ print('Vectorization...')
 x = np.zeros((len(questions), MAXLEN, len(chars)), dtype=np.bool)
 y = np.zeros((len(questions), DIGITS + 1, len(chars)), dtype=np.bool)
 for i, sentence in enumerate(questions):
-    x[i] = ctable.encode(sentence, MAXLEN)
+    x[i] = ctable.encode(sentence, MAXLEN) #onehot编码
 for i, sentence in enumerate(expected):
     y[i] = ctable.encode(sentence, DIGITS + 1)
 
@@ -127,7 +128,7 @@ np.random.shuffle(indices)
 x = x[indices]
 y = y[indices]
 
-# Explicitly set apart 10% for validation data that we never train over.
+# Explicitly set apart 10% for validation data that we never train over.拆分train,test
 split_at = len(x) - len(x) // 10
 (x_train, x_val) = x[:split_at], x[split_at:]
 (y_train, y_val) = y[:split_at], y[split_at:]
@@ -147,32 +148,34 @@ BATCH_SIZE = 128
 LAYERS = 1
 
 print('Build model...')
-model = Sequential()
-# "Encode" the input sequence using an RNN, producing an output of HIDDEN_SIZE.
-# Note: In a situation where your input sequences have a variable length,
-# use input_shape=(None, num_feature).
-model.add(RNN(HIDDEN_SIZE, input_shape=(MAXLEN, len(chars))))
-# As the decoder RNN's input, repeatedly provide with the last hidden state of
-# RNN for each time step. Repeat 'DIGITS + 1' times as that's the maximum
-# length of output, e.g., when DIGITS=3, max output is 999+999=1998.
-model.add(layers.RepeatVector(DIGITS + 1))
-# The decoder RNN could be multiple layers stacked or a single layer.
-for _ in range(LAYERS):
-    # By setting return_sequences to True, return not only the last output but
-    # all the outputs so far in the form of (num_samples, timesteps,
-    # output_dim). This is necessary as TimeDistributed in the below expects
-    # the first dimension to be the timesteps.
-    model.add(RNN(HIDDEN_SIZE, return_sequences=True))
+with tf.device('/gpu:1'):
+    model = Sequential()
+    # "Encode" the input sequence using an RNN, producing an output of HIDDEN_SIZE.
+    # Note: In a situation where your input sequences have a variable length,
+    # use input_shape=(None, num_feature).
+    model.add(RNN(HIDDEN_SIZE, input_shape=(MAXLEN, len(chars)))) #这一层解码输入
+    # As the decoder RNN's input, repeatedly provide with the last hidden state of
+    # RNN for each time step. Repeat 'DIGITS + 1' times as that's the maximum
+    # length of output, e.g., when DIGITS=3, max output is 999+999=1998.
+    model.add(layers.RepeatVector(DIGITS + 1))
+    # The decoder RNN could be multiple layers stacked or a single layer.
+    # 把1维的输入重复n次。假设输入维度为(nb_samples, dim)，那么输出shape就是(nb_samples, n, dim)
+    for _ in range(LAYERS):
+        # By setting return_sequences to True, return not only the last output but
+        # all the outputs so far in the form of (num_samples, timesteps,
+        # output_dim). This is necessary as TimeDistributed in the below expects
+        # the first dimension to be the timesteps.
+        model.add(RNN(HIDDEN_SIZE, return_sequences=True))
 
-# Apply a dense layer to the every temporal slice of an input. For each of step
-# of the output sequence, decide which character should be chosen.
-model.add(layers.TimeDistributed(layers.Dense(len(chars))))
-model.add(layers.Activation('softmax'))
+    # Apply a dense layer to the every temporal slice of an input. For each of step
+    # of the output sequence, decide which character should be chosen.
+    model.add(layers.TimeDistributed(layers.Dense(len(chars))))#batch*maxlen*12
+    model.add(layers.Activation('softmax'))#batch*maxlen*12 seq2seq learning
 model.compile(loss='categorical_crossentropy',
               optimizer='adam',
               metrics=['accuracy'])
 model.summary()
-
+tensor_callback = TensorBoard('D:\\tensorboard_log',histogram_freq=1,write_images=True)
 # Train the model each generation and show predictions against the validation
 # dataset.
 for iteration in range(1, 200):
@@ -182,11 +185,12 @@ for iteration in range(1, 200):
     model.fit(x_train, y_train,
               batch_size=BATCH_SIZE,
               epochs=1,
-              validation_data=(x_val, y_val))
+              validation_data=(x_val, y_val),
+              callbacks=[tensor_callback])
     # Select 10 samples from the validation set at random so we can visualize
     # errors.
     for i in range(10):
-        ind = np.random.randint(0, len(x_val))
+        ind = np.random.randint(0, len(x_val))#index
         rowx, rowy = x_val[np.array([ind])], y_val[np.array([ind])]
         preds = model.predict_classes(rowx, verbose=0)
         q = ctable.decode(rowx[0])
@@ -200,3 +204,12 @@ for iteration in range(1, 200):
             print(colors.fail + '☒' + colors.close, end=" ")
         print(guess)
         print('---')
+''' 示例结果
+Q 637+517
+T 1154
+☑ 1154
+---
+Q 441+56 
+T 497 
+☑ 497 
+'''
