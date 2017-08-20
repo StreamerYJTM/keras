@@ -2,12 +2,15 @@
 
 [addition_rnn.py](addition_rnn.py)
 Implementation of sequence to sequence learning for performing addition of two numbers (as strings).
+实现seq2seq的学习，以完成两个字符串数字的加法
 
 [antirectifier.py](antirectifier.py)
 Demonstrates how to write custom layers for Keras.
+展示如何写用户自己的层
 
 [babi_memnn.py](babi_memnn.py)
 Trains a memory network on the bAbI dataset for reading comprehension.
+babi数据集 取材于童书 逻辑问答
 
 [babi_rnn.py](babi_rnn.py)
 Trains a two-branch recurrent network on the bAbI dataset for reading comprehension.
